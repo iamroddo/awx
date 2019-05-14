@@ -316,7 +316,7 @@ metadata:
   labels:
     name: {{ kubernetes_deployment_name }}-web-svc
 spec:
-  type: "NodePort"
+  type: LoadBalancer
   ports:
     - name: http
       port: 80

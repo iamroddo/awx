@@ -18,8 +18,8 @@ dockerhub_base=ansible
 # openshift_pg_emptydir=True
 
 # Kubernetes Install
-# kubernetes_context=test-cluster
-# kubernetes_namespace=awx
+kubernetes_context=test-cluster
+kubernetes_namespace=awx-hcm
 # tiller_namespace=kube-system
 # Optional Kubernetes Variables
 # pg_persistence_storageClass=StorageClassName
