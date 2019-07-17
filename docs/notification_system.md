@@ -22,14 +22,13 @@ Notification templates assigned at certain levels will inherit notifications def
 
 ## Workflow
 
-When a job succeeds or fails, the error or success handler will pull a list of relevant notifications using the procedure defined above. It will then create a Notification object for each one containing relevant details about the job and then **sends** it to the destination (email addresses, slack channel(s), SMS numbers, etc.). These Notification objects are available as related resources on job types (Jobs, Inventory Updates, Project Updates), and also at `/api/v2/notifications`. You may also see what notifications have been sent from a notifications by examining its related resources.
+When a job starts, succeeds or fails, the running, success or error handler, respectively, will pull a list of relevant notifications using the procedure defined above. It then creates a Notification Object for each one containing relevant details about the job and then **sends** it to the destination (email addresses, Slack channel(s), SMS numbers, etc.). These Notification objects are available as related resources on job types (Jobs, Inventory Updates, Project Updates), and also at `/api/v2/notifications`. You may also see what notifications have been sent by examining its related resources.
 
-Notifications can succeed or fail but that will not cause its associated job to succeed or fail. The status of the notification can be viewed at its detail endpoint: `/api/v2/notifications/<n>`
+Notifications can succeed or fail but that will _not_ cause its associated job to succeed or fail. The status of the notification can be viewed at its detail endpoint: `/api/v2/notifications/<n>`
 
 ## Testing Notifications Before Using Them
 
 Once a Notification Template is created, its configuration can be tested by utilizing the endpoint at `/api/v2/notification_templates/<n>/test`   This will emit a test notification given the configuration defined by the notification.  These test notifications will also appear in the notifications list at `/api/v2/notifications`
-
 
 # Notification Types
 

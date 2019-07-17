@@ -103,13 +103,10 @@ class InvalidVirtualenvError(Exception):
 
 def dispatch_startup():
     startup_logger = logging.getLogger('awx.main.tasks')
-    startup_logger.info("Syncing Schedules")
+    startup_logger.debug("Syncing Schedules")
     for sch in Schedule.objects.all():
         try:
             sch.update_computed_fields()
-            from awx.main.signals import disable_activity_stream
-            with disable_activity_stream():
-                sch.save()
         except Exception:
             logger.exception("Failed to rebuild schedule {}.".format(sch))
 
@@ -189,20 +186,20 @@ def apply_cluster_membership_policies():
                 # NOTE: arguable behavior: policy-list-group is not added to
                 # instance's group count for consideration in minimum-policy rules
             if group_actual.instances:
-                logger.info("Policy List, adding Instances {} to Group {}".format(group_actual.instances, ig.name))
+                logger.debug("Policy List, adding Instances {} to Group {}".format(group_actual.instances, ig.name))
 
             if ig.controller_id is None:
                 actual_groups.append(group_actual)
             else:
                 # For isolated groups, _only_ apply the policy_instance_list
                 # do not add to in-memory list, so minimum rules not applied
-                logger.info('Committing instances to isolated group {}'.format(ig.name))
+                logger.debug('Committing instances to isolated group {}'.format(ig.name))
                 ig.instances.set(group_actual.instances)
 
         # Process Instance minimum policies next, since it represents a concrete lower bound to the
         # number of instances to make available to instance groups
         actual_instances = [Node(obj=i, groups=[]) for i in considered_instances if i.managed_by_policy]
-        logger.info("Total non-isolated instances:{} available for policy: {}".format(
+        logger.debug("Total non-isolated instances:{} available for policy: {}".format(
             total_instances, len(actual_instances)))
         for g in sorted(actual_groups, key=lambda x: len(x.instances)):
             policy_min_added = []
@@ -217,7 +214,7 @@ def apply_cluster_membership_policies():
                 i.groups.append(g.obj.id)
                 policy_min_added.append(i.obj.id)
             if policy_min_added:
-                logger.info("Policy minimum, adding Instances {} to Group {}".format(policy_min_added, g.obj.name))
+                logger.debug("Policy minimum, adding Instances {} to Group {}".format(policy_min_added, g.obj.name))
 
         # Finally, process instance policy percentages
         for g in sorted(actual_groups, key=lambda x: len(x.instances)):
@@ -233,7 +230,7 @@ def apply_cluster_membership_policies():
                 i.groups.append(g.obj.id)
                 policy_per_added.append(i.obj.id)
             if policy_per_added:
-                logger.info("Policy percentage, adding Instances {} to Group {}".format(policy_per_added, g.obj.name))
+                logger.debug("Policy percentage, adding Instances {} to Group {}".format(policy_per_added, g.obj.name))
 
         # Determine if any changes need to be made
         needs_change = False
@@ -242,7 +239,7 @@ def apply_cluster_membership_policies():
                 needs_change = True
                 break
         if not needs_change:
-            logger.info('Cluster policy no-op finished in {} seconds'.format(time.time() - started_compute))
+            logger.debug('Cluster policy no-op finished in {} seconds'.format(time.time() - started_compute))
             return
 
         # On a differential basis, apply instances to non-isolated groups
@@ -251,12 +248,12 @@ def apply_cluster_membership_policies():
                 instances_to_add = set(g.instances) - set(g.prior_instances)
                 instances_to_remove = set(g.prior_instances) - set(g.instances)
                 if instances_to_add:
-                    logger.info('Adding instances {} to group {}'.format(list(instances_to_add), g.obj.name))
+                    logger.debug('Adding instances {} to group {}'.format(list(instances_to_add), g.obj.name))
                     g.obj.instances.add(*instances_to_add)
                 if instances_to_remove:
-                    logger.info('Removing instances {} from group {}'.format(list(instances_to_remove), g.obj.name))
+                    logger.debug('Removing instances {} from group {}'.format(list(instances_to_remove), g.obj.name))
                     g.obj.instances.remove(*instances_to_remove)
-        logger.info('Cluster policy computation finished in {} seconds'.format(time.time() - started_compute))
+        logger.debug('Cluster policy computation finished in {} seconds'.format(time.time() - started_compute))
 
 
 @task(queue='tower_broadcast_all', exchange_type='fanout')
@@ -277,7 +274,7 @@ def delete_project_files(project_path):
     if os.path.exists(project_path):
         try:
             shutil.rmtree(project_path)
-            logger.info('Success removing project files {}'.format(project_path))
+            logger.debug('Success removing project files {}'.format(project_path))
         except Exception:
             logger.exception('Could not remove project directory {}'.format(project_path))
     if os.path.exists(lock_file):
@@ -372,7 +369,7 @@ def purge_old_stdout_files():
     for f in os.listdir(settings.JOBOUTPUT_ROOT):
         if os.path.getctime(os.path.join(settings.JOBOUTPUT_ROOT,f)) < nowtime - settings.LOCAL_STDOUT_EXPIRE_TIME:
             os.unlink(os.path.join(settings.JOBOUTPUT_ROOT,f))
-            logger.info("Removing {}".format(os.path.join(settings.JOBOUTPUT_ROOT,f)))
+            logger.debug("Removing {}".format(os.path.join(settings.JOBOUTPUT_ROOT,f)))
 
 
 @task(queue=get_local_queuename)
@@ -396,14 +393,9 @@ def cluster_node_heartbeat():
             instance_list.remove(inst)
     if this_inst:
         startup_event = this_inst.is_lost(ref_time=nowtime)
-        if this_inst.capacity == 0 and this_inst.enabled:
-            logger.warning('Rejoining the cluster as instance {}.'.format(this_inst.hostname))
-        if this_inst.enabled:
-            this_inst.refresh_capacity()
-        elif this_inst.capacity != 0 and not this_inst.enabled:
-            this_inst.capacity = 0
-            this_inst.save(update_fields=['capacity'])
+        this_inst.refresh_capacity()
         if startup_event:
+            logger.warning('Rejoining the cluster as instance {}.'.format(this_inst.hostname))
             return
     else:
         raise RuntimeError("Cluster Host Not Found: {}".format(settings.CLUSTER_HOST_ID))
@@ -496,7 +488,7 @@ def awx_periodic_scheduler():
 
         old_schedules = Schedule.objects.enabled().before(last_run)
         for schedule in old_schedules:
-            schedule.save()
+            schedule.update_computed_fields()
         schedules = Schedule.objects.enabled().between(last_run, run_now)
 
         invalid_license = False
@@ -507,14 +499,14 @@ def awx_periodic_scheduler():
 
         for schedule in schedules:
             template = schedule.unified_job_template
-            schedule.save() # To update next_run timestamp.
+            schedule.update_computed_fields() # To update next_run timestamp.
             if template.cache_timeout_blocked:
                 logger.warn("Cache timeout is in the future, bypassing schedule for template %s" % str(template.id))
                 continue
             try:
                 job_kwargs = schedule.get_job_kwargs()
                 new_unified_job = schedule.unified_job_template.create_unified_job(**job_kwargs)
-                logger.info('Spawned {} from schedule {}-{}.'.format(
+                logger.debug('Spawned {} from schedule {}-{}.'.format(
                     new_unified_job.log_format, schedule.name, schedule.pk))
 
                 if invalid_license:
@@ -609,26 +601,40 @@ def update_inventory_computed_fields(inventory_id, should_update_hosts=True):
         raise
 
 
+def update_smart_memberships_for_inventory(smart_inventory):
+    with advisory_lock('update_smart_memberships_for_inventory-{}'.format(smart_inventory.id)):
+        current = set(SmartInventoryMembership.objects.filter(inventory=smart_inventory).values_list('host_id', flat=True))
+        new = set(smart_inventory.hosts.values_list('id', flat=True))
+        additions = new - current
+        removals = current - new
+        if additions or removals:
+            with transaction.atomic():
+                if removals:
+                    SmartInventoryMembership.objects.filter(inventory=smart_inventory, host_id__in=removals).delete()
+                if additions:
+                    add_for_inventory = [
+                        SmartInventoryMembership(inventory_id=smart_inventory.id, host_id=host_id)
+                        for host_id in additions
+                    ]
+                    SmartInventoryMembership.objects.bulk_create(add_for_inventory)
+            logger.debug('Smart host membership cached for {}, {} additions, {} removals, {} total count.'.format(
+                smart_inventory.pk, len(additions), len(removals), len(new)
+            ))
+            return True  # changed
+        return False
+
+
 @task()
 def update_host_smart_inventory_memberships():
-    try:
-        with transaction.atomic():
-            smart_inventories = Inventory.objects.filter(kind='smart', host_filter__isnull=False, pending_deletion=False)
-            SmartInventoryMembership.objects.all().delete()
-            memberships = []
-            changed_inventories = set([])
-            for smart_inventory in smart_inventories:
-                add_for_inventory = [
-                    SmartInventoryMembership(inventory_id=smart_inventory.id, host_id=host_id[0])
-                    for host_id in smart_inventory.hosts.values_list('id')
-                ]
-                memberships.extend(add_for_inventory)
-                if add_for_inventory:
-                    changed_inventories.add(smart_inventory)
-            SmartInventoryMembership.objects.bulk_create(memberships)
-    except IntegrityError as e:
-        logger.error("Update Host Smart Inventory Memberships failed due to an exception: {}".format(e))
-        return
+    smart_inventories = Inventory.objects.filter(kind='smart', host_filter__isnull=False, pending_deletion=False)
+    changed_inventories = set([])
+    for smart_inventory in smart_inventories:
+        try:
+            changed = update_smart_memberships_for_inventory(smart_inventory)
+            if changed:
+                changed_inventories.add(smart_inventory)
+        except IntegrityError:
+            logger.exception('Failed to update smart inventory memberships for {}'.format(smart_inventory.pk))
     # Update computed fields for changed inventories outside atomic action
     for smart_inventory in changed_inventories:
         smart_inventory.update_computed_fields(update_groups=False, update_hosts=False)
@@ -802,7 +808,7 @@ class BaseTask(object):
                     data += '\n'
                 # For credentials used with ssh-add, write to a named pipe which
                 # will be read then closed, instead of leaving the SSH key on disk.
-                if credential and credential.kind in ('ssh', 'scm') and not ssh_too_old:
+                if credential and credential.credential_type.namespace in ('ssh', 'scm') and not ssh_too_old:
                     try:
                         os.mkdir(os.path.join(private_data_dir, 'env'))
                     except OSError as e:
@@ -822,8 +828,10 @@ class BaseTask(object):
                     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
                 private_data_files['credentials'][credential] = path
             for credential, data in private_data.get('certificates', {}).items():
-                name = 'credential_%d-cert.pub' % credential.pk
-                path = os.path.join(private_data_dir, name)
+                artifact_dir = os.path.join(private_data_dir, 'artifacts', str(self.instance.id))
+                if not os.path.exists(artifact_dir):
+                    os.makedirs(artifact_dir, mode=0o700)
+                path = os.path.join(artifact_dir, 'ssh_key_data-cert.pub')
                 with open(path, 'w') as f:
                     f.write(data)
                     f.close()
@@ -1126,6 +1134,7 @@ class BaseTask(object):
 
         try:
             isolated = self.instance.is_isolated()
+            self.instance.send_notification_templates("running")
             self.pre_run_hook(self.instance)
             if self.instance.cancel_flag:
                 self.instance = self.update_model(self.instance.pk, status='canceled')
@@ -1264,7 +1273,7 @@ class BaseTask(object):
             extra_update_fields['result_traceback'] = traceback.format_exc()
             logger.exception('%s Exception occurred while running task', self.instance.log_format)
         finally:
-            logger.info('%s finished running, producing %s events.', self.instance.log_format, self.event_ct)
+            logger.debug('%s finished running, producing %s events.', self.instance.log_format, self.event_ct)
 
         try:
             self.post_run_hook(self.instance, status)
@@ -1332,7 +1341,7 @@ class RunJob(BaseTask):
         and ansible-vault.
         '''
         passwords = super(RunJob, self).build_passwords(job, runtime_passwords)
-        cred = job.get_deprecated_credential('ssh')
+        cred = job.machine_credential
         if cred:
             for field in ('ssh_key_unlock', 'ssh_password', 'become_password', 'vault_password'):
                 value = runtime_passwords.get(field, cred.get_input('password' if field == 'ssh_password' else field, default=''))
@@ -1416,6 +1425,9 @@ class RunJob(BaseTask):
 
         # Set environment variables for cloud credentials.
         cred_files = private_data_files.get('credentials', {})
+        for cloud_cred in job.cloud_credentials:
+            if cloud_cred and cloud_cred.credential_type.namespace == 'openstack':
+                env['OS_CLIENT_CONFIG_FILE'] = cred_files.get(cloud_cred, '')
 
         for network_cred in job.network_credentials:
             env['ANSIBLE_NET_USERNAME'] = network_cred.get_input('username', default='')
@@ -1437,7 +1449,7 @@ class RunJob(BaseTask):
         Build command line argument list for running ansible-playbook,
         optionally using ssh-agent for public/private key authentication.
         '''
-        creds = job.get_deprecated_credential('ssh')
+        creds = job.machine_credential
 
         ssh_username, become_username, become_method = '', '', ''
         if creds:
@@ -1475,7 +1487,8 @@ class RunJob(BaseTask):
                 if k == 'vault_password':
                     args.append('--ask-vault-pass')
                 else:
-                    vault_id = k.split('.')[1]
+                    # split only on the first dot in case the vault ID itself contains a dot
+                    vault_id = k.split('.', 1)[1]
                     args.append('--vault-id')
                     args.append('{}@prompt'.format(vault_id))
 
@@ -1541,7 +1554,8 @@ class RunJob(BaseTask):
         d[r'Vault password:\s*?$'] = 'vault_password'
         for k, v in passwords.items():
             if k.startswith('vault_password.'):
-                vault_id = k.split('.')[1]
+                # split only on the first dot in case the vault ID itself contains a dot
+                vault_id = k.split('.', 1)[1]
                 d[r'Vault password \({}\):\s*?$'.format(vault_id)] = k
         return d
 
@@ -1591,6 +1605,10 @@ class RunJob(BaseTask):
                                             job_explanation=('Previous Task Failed: {"job_type": "%s", "job_name": "%s", "job_id": "%s"}' %
                                                              ('project_update', local_project_sync.name, local_project_sync.id)))
                     raise
+        if job.inventory.kind == 'smart':
+            # cache smart inventory memberships so that the host_filter query is not
+            # ran inside of the event saving code
+            update_smart_memberships_for_inventory(job.inventory)
 
     def final_run_hook(self, job, status, private_data_dir, fact_modification_times, isolated_manager_instance=None):
         super(RunJob, self).final_run_hook(job, status, private_data_dir, fact_modification_times)
@@ -1795,8 +1813,8 @@ class RunProjectUpdate(BaseTask):
             with transaction.atomic():
                 if InventoryUpdate.objects.filter(inventory_source=inv_src,
                                                   status__in=ACTIVE_STATES).exists():
-                    logger.info('Skipping SCM inventory update for `{}` because '
-                                'another update is already active.'.format(inv_src.name))
+                    logger.debug('Skipping SCM inventory update for `{}` because '
+                                 'another update is already active.'.format(inv_src.name))
                     continue
                 local_inv_update = inv_src.create_inventory_update(
                     _eager_fields=dict(
@@ -1834,9 +1852,9 @@ class RunProjectUpdate(BaseTask):
 
     def release_lock(self, instance):
         try:
-            fcntl.flock(self.lock_fd, fcntl.LOCK_UN)
+            fcntl.lockf(self.lock_fd, fcntl.LOCK_UN)
         except IOError as e:
-            logger.error("I/O error({0}) while trying to open lock file [{1}]: {2}".format(e.errno, instance.get_lock_file(), e.strerror))
+            logger.error("I/O error({0}) while trying to release lock file [{1}]: {2}".format(e.errno, instance.get_lock_file(), e.strerror))
             os.close(self.lock_fd)
             raise
 
@@ -1852,7 +1870,7 @@ class RunProjectUpdate(BaseTask):
             raise RuntimeError(u'Invalid lock file path')
 
         try:
-            self.lock_fd = os.open(lock_path, os.O_RDONLY | os.O_CREAT)
+            self.lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT)
         except OSError as e:
             logger.error("I/O error({0}) while trying to open lock file [{1}]: {2}".format(e.errno, lock_path, e.strerror))
             raise
@@ -1862,9 +1880,9 @@ class RunProjectUpdate(BaseTask):
             try:
                 instance.refresh_from_db(fields=['cancel_flag'])
                 if instance.cancel_flag:
-                    logger.info("ProjectUpdate({0}) was cancelled".format(instance.pk))
+                    logger.debug("ProjectUpdate({0}) was cancelled".format(instance.pk))
                     return
-                fcntl.flock(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.lockf(self.lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except IOError as e:
                 if e.errno not in (errno.EAGAIN, errno.EACCES):
@@ -2234,9 +2252,9 @@ class RunAdHocCommand(BaseTask):
         creds = ad_hoc_command.credential
         ssh_username, become_username, become_method = '', '', ''
         if creds:
-            ssh_username = creds.username
-            become_method = creds.become_method
-            become_username = creds.become_username
+            ssh_username = creds.get_input('username', default='')
+            become_method = creds.get_input('become_method', default='')
+            become_username = creds.get_input('become_username', default='')
         else:
             become_method = None
             become_username = ""
@@ -2415,7 +2433,7 @@ def deep_copy_model_obj(
     model_module, model_name, obj_pk, new_obj_pk,
     user_pk, sub_obj_list, permission_check_func=None
 ):
-    logger.info('Deep copy {} from {} to {}.'.format(model_name, obj_pk, new_obj_pk))
+    logger.debug('Deep copy {} from {} to {}.'.format(model_name, obj_pk, new_obj_pk))
     from awx.api.generics import CopyAPIView
     from awx.main.signals import disable_activity_stream
     model = getattr(importlib.import_module(model_module), model_name, None)

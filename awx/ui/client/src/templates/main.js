@@ -124,7 +124,7 @@ angular.module('templates', [surveyMaker.name, jobTemplates.name, labels.name, p
                                         .then(function(data) {
                                             if (!data.actions.POST) {
                                                 $state.go("^");
-                                                Alert(i18n._('Permission Error'), i18n._('You do not have permission to add a job template.'), 'alert-info');
+                                                Alert(i18n._('Permission Error'), i18n._('You do not have permission to add a job template, or there are no projects available.'), 'alert-info');
                                             }
                                         }).catch(function(response){
                                             ProcessErrors(null, response.data, response.status, null, {
@@ -498,7 +498,7 @@ angular.module('templates', [surveyMaker.name, jobTemplates.name, labels.name, p
                     },
                     views: {
                         'modal': {
-                            template: `<workflow-maker ng-if="includeWorkflowMaker" workflow-job-template-obj="workflow_job_template_obj" can-add-workflow-job-template="canAddWorkflowJobTemplate"></workflow-maker>`
+                            template: `<workflow-maker ng-if="includeWorkflowMaker" workflow-job-template-obj="workflow_job_template_obj" can-add-or-edit="canAddOrEdit"></workflow-maker>`
                         },
                         'jobTemplateList@templates.editWorkflowJobTemplate.workflowMaker': {
                             templateProvider: function(WorkflowMakerJobTemplateList, generateList) {

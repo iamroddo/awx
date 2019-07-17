@@ -2,11 +2,13 @@
 # All Rights Reserved.
 
 from django.conf.urls import url, include
+from django.conf import settings
 from awx.main.views import (
     handle_400,
     handle_403,
     handle_404,
     handle_500,
+    handle_csp_violation,
 )
 
 
@@ -19,7 +21,21 @@ urlpatterns = [
     url(r'^(?:api/)?403.html$', handle_403),
     url(r'^(?:api/)?404.html$', handle_404),
     url(r'^(?:api/)?500.html$', handle_500),
+    url(r'^csp-violation/', handle_csp_violation),
 ]
+
+if settings.SETTINGS_MODULE == 'awx.settings.development':
+    try:
+        import debug_toolbar
+        urlpatterns += [
+            # for Django version 2.0
+            # path('__debug__/', include(debug_toolbar.urls)),
+
+            # TODO: this is the Django < 2.0 version, REMOVEME
+            url(r'^__debug__/', include(debug_toolbar.urls))
+        ]
+    except ImportError:
+        pass
 
 handler400 = 'awx.main.views.handle_400'
 handler403 = 'awx.main.views.handle_403'

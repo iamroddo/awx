@@ -1,23 +1,29 @@
-The requirements.txt and requirements_ansible.txt files are generated from requirements.in and requirements_ansible.in, respectively, using `pip-tools` `pip-compile`. The following commands should do this if ran inside the tower_tools container.
+The `requirements.txt` and `requirements_ansible.txt` files are generated from `requirements.in` and `requirements_ansible.in`, respectively, using `pip-tools` `pip-compile`.
 
-NOTE: before running `pip-compile`, please copy-paste contents in `requirements/requirements_git.txt` to the top of `requirements/requirements.in` and prepend each copied line with `-e `. Later after `requirements.txt` is generated, don't forget to remove all `git+https://github.com...`-like lines from both `requirements.txt` and `requirements.in` (repeat for `requirements_ansible_git.txt` and `requirements_ansible.in`)
+Run `./updater.sh` command from inside `./requirements` directory of the awx repository.
 
-At the end of `requirements/requirements.in`, pip and setuptools need to have their versions pinned.
+Make sure you have `patch, awk, python3, python2, python3-venv, python2-virtualenv, pip2, pip3` installed.
+
+This script will:
+
+  - Update `requirements.txt` based on `requirements.in`
+  - Update/generate `requirements_ansible.txt` based on `requirements_ansible.in`
+    - including an automated patch that adds `python_version < "3"` for Python 2 backward compatibility
+  - Removes the `docutils` dependency line from `requirements.txt` and `requirements_ansible.txt`
+
+You can also upgrade (`pip-compile --upgrade`) the dependencies by running `./updater.sh upgrade`.
+
+## Licenses and Source Files
+
+If any library has a change to its license with the upgrade, then the license for that library
+inside of `docs/licenses` needs to be updated.
+
+For libraries that have source distribution requirements (LGPL as an example),
+a tarball of the library is kept along with the license.
+To download the PyPI tarball, you can run this command:
 
 ```
-python3 -m venvpip install pip-tools /buildit
-source /buildit/bin/activate
-pip install pip-tools
-pip install pip --upgrade
-
-pip-compile requirements/requirements.in > requirements/requirements.txt
-pip-compile requirements/requirements_ansible.in > requirements/requirements_ansible.txt
+pip download <pypi library name> -d docs/licenses/ --no-binary :all: --no-deps
 ```
 
-## Known Issues
-
-* Remove the `-e` from packages of the form `-e git+https://github.com...` in the generated `.txt`. Failure to do so will result in a "bad" RPM and DEB due to the `pip install` laying down a symbolic link with an absolute path from the virtualenv to the git repository that will differ from when the RPM and DEB are build to when the RPM and DEB are installed on a machine. By removing the `-e` the symbolic egg link will not be created and all is well.
-
-* As of `pip-tools` `1.8.1` `pip-compile` does not resolve packages specified using a git url. Thus, dependencies for things like `dm.xmlsec.binding` do not get resolved and output to `requirements.txt`. This means that:
-  * can't use `pip install --no-deps` because other deps WILL be sucked in
-  * all dependencies are NOT captured in our `.txt` files. This means you can't rely on the `.txt` when gathering licenses.
+Make sure to delete the old tarball if it is an upgrade.

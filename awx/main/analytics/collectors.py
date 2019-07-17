@@ -153,10 +153,16 @@ def projects_by_scm_type(since):
     return counts
 
 
+def _get_isolated_datetime(last_check):
+    if last_check:
+        return last_check.isoformat()
+    return last_check
+
+
 @register('instance_info')
 def instance_info(since):
     info = {}
-    instances = models.Instance.objects.values_list('hostname').annotate().values(
+    instances = models.Instance.objects.values_list('hostname').values(
         'uuid', 'version', 'capacity', 'cpu', 'memory', 'managed_by_policy', 'hostname', 'last_isolated_check', 'enabled')
     for instance in instances:
         instance_info = {
@@ -166,7 +172,7 @@ def instance_info(since):
             'cpu': instance['cpu'],
             'memory': instance['memory'],
             'managed_by_policy': instance['managed_by_policy'],
-            'last_isolated_check': instance['last_isolated_check'],
+            'last_isolated_check': _get_isolated_datetime(instance['last_isolated_check']),
             'enabled': instance['enabled']
         }
         info[instance['uuid']] = instance_info
@@ -177,9 +183,9 @@ def instance_info(since):
 def job_counts(since):
     counts = {}
     counts['total_jobs'] = models.UnifiedJob.objects.exclude(launch_type='sync').count()
-    counts['status'] = dict(models.UnifiedJob.objects.exclude(launch_type='sync').values_list('status').annotate(Count('status')))
-    counts['launch_type'] = dict(models.UnifiedJob.objects.exclude(launch_type='sync').values_list('launch_type').annotate(Count('launch_type')))
-    
+    counts['status'] = dict(models.UnifiedJob.objects.exclude(launch_type='sync').values_list('status').annotate(Count('status')).order_by())
+    counts['launch_type'] = dict(models.UnifiedJob.objects.exclude(launch_type='sync').values_list(
+        'launch_type').annotate(Count('launch_type')).order_by())
     return counts
     
     
@@ -187,12 +193,12 @@ def job_counts(since):
 def job_instance_counts(since):
     counts = {}
     job_types = models.UnifiedJob.objects.exclude(launch_type='sync').values_list(
-        'execution_node', 'launch_type').annotate(job_launch_type=Count('launch_type'))
+        'execution_node', 'launch_type').annotate(job_launch_type=Count('launch_type')).order_by()
     for job in job_types:
         counts.setdefault(job[0], {}).setdefault('launch_type', {})[job[1]] = job[2]
         
     job_statuses = models.UnifiedJob.objects.exclude(launch_type='sync').values_list(
-        'execution_node', 'status').annotate(job_status=Count('status'))
+        'execution_node', 'status').annotate(job_status=Count('status')).order_by()
     for job in job_statuses:
         counts.setdefault(job[0], {}).setdefault('status', {})[job[1]] = job[2]
     return counts

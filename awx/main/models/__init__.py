@@ -16,7 +16,7 @@ from awx.main.models.organization import (  # noqa
     Organization, Profile, Team, UserSessionMembership
 )
 from awx.main.models.credential import (  # noqa
-    Credential, CredentialType, CredentialInputSource, ManagedCredentialType, V1Credential, build_safe_env
+    Credential, CredentialType, CredentialInputSource, ManagedCredentialType, build_safe_env
 )
 from awx.main.models.projects import Project, ProjectUpdate  # noqa
 from awx.main.models.inventory import (  # noqa
@@ -35,7 +35,7 @@ from awx.main.models.ad_hoc_commands import AdHocCommand # noqa
 from awx.main.models.schedules import Schedule # noqa
 from awx.main.models.activity_stream import ActivityStream # noqa
 from awx.main.models.ha import (  # noqa
-    Instance, InstanceGroup, JobOrigin, TowerScheduleState,
+    Instance, InstanceGroup, TowerScheduleState,
 )
 from awx.main.models.rbac import (  # noqa
     Role, batch_role_ancestor_rebuilding, get_roles_on_resource,
@@ -60,24 +60,6 @@ from awx.main.models.oauth import ( # noqa
     OAuth2AccessToken, OAuth2Application
 )
 from oauth2_provider.models import Grant, RefreshToken # noqa -- needed django-oauth-toolkit model migrations
-
-
-
-# Monkeypatch Django serializer to ignore django-taggit fields (which break
-# the dumpdata command; see https://github.com/alex/django-taggit/issues/155).
-from django.core.serializers.python import Serializer as _PythonSerializer
-_original_handle_m2m_field = _PythonSerializer.handle_m2m_field
-
-
-def _new_handle_m2m_field(self, obj, field):
-    try:
-        field.rel.through._meta
-    except AttributeError:
-        return
-    return _original_handle_m2m_field(self, obj, field)
-
-
-_PythonSerializer.handle_m2m_field = _new_handle_m2m_field
 
 
 # Add custom methods to User model for permissions checks.
@@ -158,7 +140,7 @@ User.add_to_class('is_system_auditor', user_is_system_auditor)
 
 
 def user_is_in_enterprise_category(user, category):
-    ret = (category,) in user.enterprise_auth.all().values_list('provider') and not user.has_usable_password()
+    ret = (category,) in user.enterprise_auth.values_list('provider') and not user.has_usable_password()
     # NOTE: this if-else block ensures existing enterprise users are still able to
     # log in. Remove it in a future release
     if category == 'radius':
@@ -174,9 +156,6 @@ User.add_to_class('is_in_enterprise_category', user_is_in_enterprise_category)
 
 
 def o_auth2_application_get_absolute_url(self, request=None):
-    # this page does not exist in v1
-    if request.version == 'v1':
-        return reverse('api:o_auth2_application_detail', kwargs={'pk': self.pk})  # use default version
     return reverse('api:o_auth2_application_detail', kwargs={'pk': self.pk}, request=request)
 
 
@@ -184,9 +163,6 @@ OAuth2Application.add_to_class('get_absolute_url', o_auth2_application_get_absol
 
 
 def o_auth2_token_get_absolute_url(self, request=None):
-    # this page does not exist in v1
-    if request.version == 'v1':
-        return reverse('api:o_auth2_token_detail', kwargs={'pk': self.pk})  # use default version
     return reverse('api:o_auth2_token_detail', kwargs={'pk': self.pk}, request=request)
 
 

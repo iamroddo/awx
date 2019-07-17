@@ -73,6 +73,9 @@ clean-ui:
 	rm -rf awx/ui/test/spec/reports/
 	rm -rf awx/ui/test/e2e/reports/
 	rm -rf awx/ui/client/languages/
+	rm -rf awx/ui_next/node_modules/
+	rm -rf awx/ui_next/coverage/
+	rm -rf awx/ui_next/build/locales/_build/
 	rm -f $(UI_DEPS_FLAG_FILE)
 	rm -f $(UI_RELEASE_DEPS_FLAG_FILE)
 	rm -f $(UI_RELEASE_FLAG_FILE)
@@ -345,7 +348,8 @@ pylint: reports
 	@(set -o pipefail && $@ | reports/$@.report)
 
 genschema: reports
-	$(MAKE) swagger PYTEST_ARGS="--genschema"
+	$(MAKE) swagger PYTEST_ARGS="--genschema --create-db "
+	mv swagger.json schema.json
 
 swagger: reports
 	@if [ "$(VENV_BASE)" ]; then \
@@ -496,6 +500,10 @@ ui-devel: $(UI_DEPS_FLAG_FILE)
 ui-test: $(UI_DEPS_FLAG_FILE)
 	$(NPM_BIN) --prefix awx/ui run test
 
+ui-lint: $(UI_DEPS_FLAG_FILE)
+	$(NPM_BIN) run --prefix awx/ui jshint
+	$(NPM_BIN) run --prefix awx/ui lint
+
 # A standard go-to target for API developers to use building the frontend
 ui: clean-ui ui-devel
 
@@ -508,6 +516,21 @@ jshint: $(UI_DEPS_FLAG_FILE)
 	$(NPM_BIN) run --prefix awx/ui lint
 
 # END UI TASKS
+# --------------------------------------
+
+# UI NEXT TASKS
+# --------------------------------------
+
+ui-next-lint:
+	$(NPM_BIN) --prefix awx/ui_next install
+	$(NPM_BIN) run --prefix awx/ui_next lint
+	$(NPM_BIN) run --prefix awx/ui_next prettier-check
+
+ui-next-test:
+	$(NPM_BIN) --prefix awx/ui_next install
+	$(NPM_BIN) run --prefix awx/ui_next test
+
+# END UI NEXT TASKS
 # --------------------------------------
 
 # Build a pip-installable package into dist/ with a timestamped version number.
@@ -546,15 +569,12 @@ docker-auth:
 	fi;
 
 # Docker isolated rampart
-docker-isolated:
-	TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose -f tools/docker-compose.yml -f tools/docker-isolated-override.yml create
-	docker start tools_awx_1
-	docker start tools_isolated_1
+docker-compose-isolated:
 	CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose -f tools/docker-compose.yml -f tools/docker-isolated-override.yml up
 
 # Docker Compose Development environment
 docker-compose: docker-auth
-	CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose -f tools/docker-compose.yml up --no-recreate awx
+	CURRENT_UID=$(shell id -u) OS="$(shell docker info | grep 'Operating System')" TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose -f tools/docker-compose.yml up --no-recreate awx
 
 docker-compose-cluster: docker-auth
 	CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose -f tools/docker-compose-cluster.yml up
@@ -564,7 +584,7 @@ docker-compose-credential-plugins: docker-auth
 	CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose -f tools/docker-compose.yml -f tools/docker-credential-plugins-override.yml up --no-recreate awx
 
 docker-compose-test: docker-auth
-	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /bin/bash
+	cd tools && CURRENT_UID=$(shell id -u) OS="$(shell docker info | grep 'Operating System')" TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /bin/bash
 
 docker-compose-runtest:
 	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /start_tests.sh
@@ -572,12 +592,7 @@ docker-compose-runtest:
 docker-compose-build-swagger:
 	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /start_tests.sh swagger
 
-docker-compose-genschema:
-	cd tools && CURRENT_UID=$(shell id -u) TAG=$(COMPOSE_TAG) DEV_DOCKER_TAG_BASE=$(DEV_DOCKER_TAG_BASE) docker-compose run --rm --service-ports awx /start_tests.sh genschema
-	mv swagger.json schema.json
-
-docker-compose-detect-schema-change:
-	$(MAKE) docker-compose-genschema
+detect-schema-change: genschema
 	curl https://s3.amazonaws.com/awx-public-ci-files/schema.json -o reference-schema.json
 	# Ignore differences in whitespace with -b
 	diff -u -b reference-schema.json schema.json
@@ -590,12 +605,14 @@ docker-compose-build: awx-devel-build
 
 # Base development image build
 awx-devel-build:
-	docker build -t ansible/awx_devel -f tools/docker-compose/Dockerfile .
+	docker build -t ansible/awx_devel -f tools/docker-compose/Dockerfile \
+		--cache-from=$(DEV_DOCKER_TAG_BASE)/awx_devel:devel \
+		--cache-from=$(DEV_DOCKER_TAG_BASE)/awx_devel:$(COMPOSE_TAG) .
 	docker tag ansible/awx_devel $(DEV_DOCKER_TAG_BASE)/awx_devel:$(COMPOSE_TAG)
 	#docker push $(DEV_DOCKER_TAG_BASE)/awx_devel:$(COMPOSE_TAG)
 
 # For use when developing on "isolated" AWX deployments
-awx-isolated-build:
+docker-compose-isolated-build: awx-devel-build
 	docker build -t ansible/awx_isolated -f tools/docker-isolated/Dockerfile .
 	docker tag ansible/awx_isolated $(DEV_DOCKER_TAG_BASE)/awx_isolated:$(COMPOSE_TAG)
 	#docker push $(DEV_DOCKER_TAG_BASE)/awx_isolated:$(COMPOSE_TAG)

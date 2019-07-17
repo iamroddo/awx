@@ -61,13 +61,11 @@ def gather(dest=None, module=None):
     :pararm module: the module to search for registered analytic collector
                     functions; defaults to awx.main.analytics.collectors
     """
-    
+
     run_now = now()
     state = TowerAnalyticsState.get_solo()
     last_run = state.last_run
     logger.debug("Last analytics run was: {}".format(last_run))
-    state.last_run = run_now
-    state.save()
     
     max_interval = now() - timedelta(days=7)
     if last_run < max_interval or not last_run:
@@ -80,7 +78,7 @@ def gather(dest=None, module=None):
     
     if not settings.INSIGHTS_TRACKING_STATE:
         logger.error("Insights analytics not enabled")
-        return "Error: Insights analytics not enabled"
+        return
 
     if module is None:
         from awx.main.analytics import collectors
@@ -121,18 +119,28 @@ def ship(path):
     """
     Ship gathered metrics via the Insights agent
     """
-    agent = 'insights-client'
-    if shutil.which(agent) is None:
-        logger.error('could not find {} on PATH'.format(agent))
-        return
-    logger.debug('shipping analytics file: {}'.format(path))
     try:
-        cmd = [
-            agent, '--payload', path, '--content-type', settings.INSIGHTS_AGENT_MIME
-        ]
-        output = smart_str(subprocess.check_output(cmd, timeout=60 * 5))
-        logger.debug(output)
-    except subprocess.CalledProcessError:
-        logger.exception('{} failure:'.format(cmd))
-    except subprocess.TimeoutExpired:
-        logger.exception('{} timeout:'.format(cmd))
+        agent = 'insights-client'
+        if shutil.which(agent) is None:
+            logger.error('could not find {} on PATH'.format(agent))
+            return
+        logger.debug('shipping analytics file: {}'.format(path))
+        try:
+            cmd = [
+                agent, '--payload', path, '--content-type', settings.INSIGHTS_AGENT_MIME
+            ]
+            output = smart_str(subprocess.check_output(cmd, timeout=60 * 5))
+            logger.debug(output)
+            # reset the `last_run` when data is shipped
+            run_now = now()
+            state = TowerAnalyticsState.get_solo()
+            state.last_run = run_now
+            state.save()
+
+        except subprocess.CalledProcessError:
+            logger.exception('{} failure:'.format(cmd))
+        except subprocess.TimeoutExpired:
+            logger.exception('{} timeout:'.format(cmd))
+    finally:
+        # cleanup tar.gz
+        os.remove(path)

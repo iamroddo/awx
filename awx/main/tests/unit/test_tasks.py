@@ -256,6 +256,7 @@ class TestExtraVarSanitation(TestJobExecution):
 
     def test_vars_unsafe_by_default(self, job, private_data_dir):
         job.created_by = User(pk=123, username='angry-spud')
+        job.inventory = Inventory(pk=123, name='example-inv') 
 
         task = tasks.RunJob()
         task.build_extra_vars_file(job, private_data_dir)
@@ -268,13 +269,14 @@ class TestExtraVarSanitation(TestJobExecution):
                        'awx_user_name', 'tower_job_launch_type',
                        'awx_project_revision',
                        'tower_project_revision', 'tower_user_name',
-                       'awx_job_launch_type']:
+                       'awx_job_launch_type',
+                       'awx_inventory_name', 'tower_inventory_name']:
             assert hasattr(extra_vars[unsafe], '__UNSAFE__')
 
         # ensure that non-strings are marked as safe
         for safe in ['awx_job_template_id', 'awx_job_id', 'awx_user_id',
                      'tower_user_id', 'tower_job_template_id',
-                     'tower_job_id']:
+                     'tower_job_id', 'awx_inventory_id', 'tower_inventory_id']:
             assert not hasattr(extra_vars[safe], '__UNSAFE__')
 
 
@@ -378,6 +380,7 @@ class TestGenericRun():
         job.status = 'running'
         job.cancel_flag = True
         job.websocket_emit_status = mock.Mock()
+        job.send_notification_templates = mock.Mock()
 
         task = tasks.RunJob()
         task.update_model = mock.Mock(wraps=update_model_wrapper)
@@ -536,6 +539,7 @@ class TestAdhocRun(TestJobExecution):
     def test_options_jinja_usage(self, adhoc_job, adhoc_update_model_wrapper):
         adhoc_job.module_args = '{{ ansible_ssh_pass }}'
         adhoc_job.websocket_emit_status = mock.Mock()
+        adhoc_job.send_notification_templates = mock.Mock()
 
         task = tasks.RunAdHocCommand()
         task.update_model = mock.Mock(wraps=adhoc_update_model_wrapper)
@@ -688,13 +692,19 @@ class TestJobCredentials(TestJobExecution):
         job.websocket_emit_status = mock.Mock()
         job._credentials = []
 
+        def _credentials_filter(credential_type__kind=None):
+            creds = job._credentials
+            if credential_type__kind:
+                creds = [c for c in creds if c.credential_type.kind == credential_type__kind]
+            return mock.Mock(
+                __iter__ = lambda *args: iter(creds),
+                first = lambda: creds[0] if len(creds) else None
+            )
+
         credentials_mock = mock.Mock(**{
             'all': lambda: job._credentials,
             'add': job._credentials.append,
-            'filter.return_value': mock.Mock(
-                __iter__ = lambda *args: iter(job._credentials),
-                first = lambda: job._credentials[0]
-            ),
+            'filter.side_effect': _credentials_filter,
             'prefetch_related': lambda _: credentials_mock,
             'spec_set': ['all', 'add', 'filter', 'prefetch_related'],
         })
@@ -872,7 +882,7 @@ class TestJobCredentials(TestJobExecution):
     def test_multi_vault_password(self, private_data_dir, job):
         task = tasks.RunJob()
         vault = CredentialType.defaults['vault']()
-        for i, label in enumerate(['dev', 'prod']):
+        for i, label in enumerate(['dev', 'prod', 'dotted.name']):
             credential = Credential(
                 pk=i,
                 credential_type=vault,
@@ -892,10 +902,12 @@ class TestJobCredentials(TestJobExecution):
         )
         assert vault_passwords['Vault password \(prod\):\\s*?$'] == 'pass@prod'  # noqa
         assert vault_passwords['Vault password \(dev\):\\s*?$'] == 'pass@dev'  # noqa
+        assert vault_passwords['Vault password \(dotted.name\):\\s*?$'] == 'pass@dotted.name'  # noqa
         assert vault_passwords['Vault password:\\s*?$'] == ''  # noqa
         assert '--ask-vault-pass' not in ' '.join(args)
         assert '--vault-id dev@prompt' in ' '.join(args)
         assert '--vault-id prod@prompt' in ' '.join(args)
+        assert '--vault-id dotted.name@prompt' in ' '.join(args)
 
     def test_multi_vault_id_conflict(self, job):
         task = tasks.RunJob()
@@ -2248,7 +2260,7 @@ def test_os_open_oserror():
 
 def test_fcntl_ioerror():
     with pytest.raises(OSError):
-        fcntl.flock(99999, fcntl.LOCK_EX)
+        fcntl.lockf(99999, fcntl.LOCK_EX)
 
 
 @mock.patch('os.open')
@@ -2276,8 +2288,8 @@ def test_aquire_lock_open_fail_logged(logging_getLogger, os_open):
 @mock.patch('os.open')
 @mock.patch('os.close')
 @mock.patch('logging.getLogger')
-@mock.patch('fcntl.flock')
-def test_aquire_lock_acquisition_fail_logged(fcntl_flock, logging_getLogger, os_close, os_open):
+@mock.patch('fcntl.lockf')
+def test_aquire_lock_acquisition_fail_logged(fcntl_lockf, logging_getLogger, os_close, os_open):
     err = IOError()
     err.errno = 3
     err.strerror = 'dummy message'
@@ -2291,7 +2303,7 @@ def test_aquire_lock_acquisition_fail_logged(fcntl_flock, logging_getLogger, os_
     logger = mock.Mock()
     logging_getLogger.return_value = logger
 
-    fcntl_flock.side_effect = err
+    fcntl_lockf.side_effect = err
 
     ProjectUpdate = tasks.RunProjectUpdate()
     with pytest.raises(IOError, message='dummy message'):

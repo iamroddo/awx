@@ -200,7 +200,7 @@ export default ['$compile', 'Attr', 'Icon',
                 if (options.showSearch === undefined || options.showSearch === true) {
                     let singleSearchParam = list.singleSearchParam && list.singleSearchParam.param ? `single-search-param="${list.singleSearchParam.param}"` : '';
                     html += `
-                    <div ng-hide="${list.name}.length === 0 && (searchTags | isEmpty)">
+                    <div ng-hide="!${list.alwaysShowSearch} && ${list.name}.length === 0 && (searchTags | isEmpty)">
                         <smart-search
                             django-model="${list.name}"
                             ${singleSearchParam}
@@ -244,7 +244,7 @@ export default ['$compile', 'Attr', 'Icon',
 
                 // Show the "no items" box when loading is done and the user isn't actively searching and there are no results
                 if (options.showEmptyPanel === undefined || options.showEmptyPanel === true){
-                    html += `<div class="List-noItems" ng-show="${list.name}.length === 0 && (searchTags | isEmpty)">`;
+                    html += `<div class="${list.emptyListClass || "List-noItems"}" ng-show="${list.name}.length === 0 && (searchTags | isEmpty)">`;
                     html += (list.emptyListText) ? list.emptyListText :  i18n._("PLEASE ADD ITEMS TO THIS LIST");
                     html += "</div>";
                 }
@@ -363,7 +363,7 @@ export default ['$compile', 'Attr', 'Icon',
                     innerTable += `</div>`;
                 }
 
-                innerTable += `<div class='d-flex h-100'>`;
+                innerTable += `<div class='d-flex h-100' style='min-width: 0;'>`;
 
                 if (list.index) {
                     innerTable += "<div class=\"d-none d-sm-flex index-column List-tableCell\">{{ $index + ((" + list.iterator + "_page - 1) * " + list.iterator + "_page_size) + 1 }}.</div>\n";
